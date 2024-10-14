@@ -1,5 +1,5 @@
-streamlit
-langchain
-langchain-community
-SpeechRecognition
-gTTS
+streamlit==1.0.0
+langchain==0.0.1
+langchain_community==0.0.1
+speech_recognition==3.8.1
+gtts==2.2.1
