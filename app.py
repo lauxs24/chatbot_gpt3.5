@@ -106,7 +106,7 @@ MODEL = st.sidebar.selectbox(label='Model', options=['gpt-3.5-turbo', 'text-davi
 
 # Ask the user to enter their OpenAI API key
 API_O = st.text_input(
-    "blue[Enter your OpenAI API-KEY: ]",
+    "blue:[Enter your OpenAI API-KEY: ]",
     placeholder="Paste your OpenAI API-KEY here:",
     type="password",
 )
