@@ -1,4 +1,4 @@
-#Import necessary libaries
+# Import necessary libraries
 import streamlit as st
 from langchain.chains import ConversationChain
 from langchain.chains.conversation.memory import ConversationEntityMemory
@@ -8,22 +8,23 @@ import speech_recognition as sr
 from gtts import gTTS
 from io import BytesIO
 import base64
+from database_connection import DataConnection
+import bcrypt
+import pandas as pd
 
-#Set Streamlit page configuration
-
+# Set Streamlit page configuration
 st.set_page_config(page_title="ChatBot🤖", layout="centered")
 
 hide_st_style = """
-            <style>
-            #MainMenu {visibility: hidden;}
-            footer {visibility: hidden;}
-            header {visibility: hidden;}
-            </style>
-            """
+    <style>
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    header {visibility: hidden;}
+    </style>
+"""
 st.markdown(hide_st_style, unsafe_allow_html=True)
 
-#Initialize session states
-
+# Initialize session states
 if "generated" not in st.session_state:
     st.session_state["generated"] = []
 if "past" not in st.session_state:
@@ -33,15 +34,76 @@ if "input" not in st.session_state:
 if "stored_session" not in st.session_state:
     st.session_state["stored_session"] = []
 
-#Define function to get user input(text of speech)
+# Initialize database connection
+db = DataConnection()
+db.create_tables()  # Create tables when the application starts
+
+# Define chatbot name
+CHATBOT_NAME = "Dế Mèn"
+
+# Thêm phần giới thiệu thân thiện và nhiệt tình
+def chatbot_welcome():
+    st.title(f"Chào mừng bạn đến với {CHATBOT_NAME}! 🤖")
+    st.write(f"""
+    Xin chào các bạn! Tôi là {CHATBOT_NAME}, hôm nay tôi rất vinh dự được làm hướng dẫn viên du lịch của các bạn.
+    Với đôi cánh khỏe khoắn và kinh nghiệm phiêu lưu qua nhiều miền đất lạ, tôi sẽ đón tiếp và hướng dẫn các bạn trong hành trình này.
+    Nhiệm vụ của tôi là sắp xếp mọi việc thật chu đáo, từ chỗ ở, ăn uống, đến việc đi lại nghỉ ngơi, đảm bảo các bạn có một trải nghiệm du lịch tuyệt vời nhất.
+    Nếu có bất kỳ tình huống phát sinh nào, đừng lo lắng! Tôi sẽ có cách giải quyết nhanh chóng và hợp lý.
+    Chuyến hành trình của chúng ta sẽ đưa các bạn đến những địa điểm độc đáo, nơi mỗi nơi đều ẩn chứa những câu chuyện hấp dẫn và những bí mật ít ai biết đến.
+    Tôi sẽ cùng các bạn khám phá từng điều kỳ thú và bí ẩn trong suốt chuyến đi này!
+    """)
+chatbot_welcome()
+
+# Giao diện người dùng cho đăng nhập và đăng ký
+st.subheader("Tạo tài khoản để bắt đầu hành trình cùng tôi nào!")
+username = st.text_input("Username")
+email = st.text_input("Email")
+password = st.text_input("Password", type="password")
+
+if st.button("Register"):
+    if username and email and password:
+        # Hash the password
+        hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
+        
+        # Check if user already exists
+        if db.check_user_exists(username, email):
+            st.error("Người dùng đã tồn tại. Hãy thử đăng nhập.")
+        else:
+            # Register user
+            db.register_user(username, email, hashed_password.decode('utf-8'))
+            st.success("Đăng ký thành công!")
+    else:
+        st.error("Vui lòng nhập đầy đủ thông tin.")
+
+# Giao diện đăng nhập
+st.subheader("Đăng nhập để tiếp tục chuyến hành trình!")
+login_username = st.text_input("Tên đăng nhập", key="login_username")
+login_password = st.text_input("Mật khẩu", type="password", key="login_password")
+
+if st.button("Login"):
+    if db.authenticate_user(login_username, login_password):
+        st.success(f"Xin chào {login_username}, bạn đã đăng nhập thành công!")
+        
+        # After successful login, show import and export options
+        st.subheader("Quản lý dữ liệu")
+
+        # Import data
+        st.subheader("Nhập dữ liệu")
+        uploaded_file = st.file_uploader("Chọn file CSV", type="csv")
+        if uploaded_file is not None:
+            db.import_data(uploaded_file)
+            st.success("Dữ liệu đã được nhập thành công!")
+
+        # Export data
+        st.subheader("Xuất dữ liệu")
+        table_name = st.selectbox("Chọn bảng để xuất", ["Location", "User", "Review"])
+        if st.button("Xuất"):
+            export_file_path = f"{table_name}_data.csv"
+            db.export_data(table_name, export_file_path)
+            st.success(f"Dữ liệu đã xuất thành công đến {export_file_path}!")
+
+# Get user input (text or speech)
 def get_text():
-    """
-    Get the user input text or use speech recognition for either English or Vietnamese.
-    Return:
-        (str): The text entered or spoken by user 
-        (str): The language choice for speech recognition ('English' or 'Vietnamese')
-    """
-    #Get input from the user throught text
     input_text = st.text_input(
         "You: ",
         st.session_state["input"],
@@ -50,119 +112,87 @@ def get_text():
         label_visibility="hidden",
     )
 
-    #Add option to use voice
-    # Add option to use voice
-    use_voice = st.checkbox("Use voice input")
+    use_voice = st.checkbox("Sử dụng giọng nói")
     
     if use_voice:
-        language_choice = st.radio("Choose language for speech recognition:", ("English", "Vietnamese"))
+        language_choice = st.radio("Chọn ngôn ngữ cho nhận diện giọng nói:", ("English", "Vietnamese"))
         
-        if st.button("Start Recording"):
+        if st.button("Bắt đầu ghi âm"):
             r = sr.Recognizer()
             with sr.Microphone() as source:
-                st.write("Listening...")
+                st.write("Đang nghe... Vui lòng nói.")
                 audio = r.listen(source)
-                
-            try:
-                if language_choice == "English":
-                    input_text = r.recognize_google(audio, language="en-US")
-                else:
-                    input_text = r.recognize_google(audio, language="vi-VN")
-                st.write(f"You said: {input_text}")
-            except sr.UnknownValueError:
-                st.write("Sorry, I couldn't understand that.")
-            except sr.RequestError:
-                st.write("Sorry, there was an error with the speech recognition service.")
+                try:
+                    if language_choice == "English":
+                        input_text = r.recognize_google(audio, language="en-US")
+                    else:
+                        input_text = r.recognize_google(audio, language="vi-VN")
+                    st.write(f"Bạn nói: {input_text}")
+                except sr.UnknownValueError:
+                    st.write("Xin lỗi, tôi không thể nhận diện giọng nói.")
+                except sr.RequestError as e:
+                    st.write(f"Lỗi kết nối tới dịch vụ nhận diện giọng nói; {e}")
 
     return input_text, language_choice if use_voice else "English"
 
-#Define function to convert text to speech and play it
+# Convert text to speech and play it
 def text_to_speech(text, language):
-    """
-    Convert text to speech and play it.
-    
-    Args:
-        text (str): The text to be converted to speech.
-        language (str): The language of the text ('English' or 'Vietnamese').
-    """
     tts = gTTS(text=text, lang='en' if language == 'English' else 'vi', slow=False)
-    audio_file = BytesIO() #use BytesIO to save audio as byte data
-    tts.write_to_fp(audio_file) 
-    audio_file.seek(0) # reset file pointer to begining
+    audio_file = BytesIO()
+    tts.write_to_fp(audio_file)
+    audio_file.seek(0)
     
-    # Encode the audio file as base64 to play in Streamlit
     audio_bytes = audio_file.getvalue()
     b64 = base64.b64encode(audio_bytes).decode()
     md = f"""
         <audio autoplay="true">
         <source src="data:audio/mp3;base64,{b64}" type="audio/mp3">
         </audio>
-        """
-    st.markdown(md, unsafe_allow_html=True) # Insert audio into the page
+    """
+    st.markdown(md, unsafe_allow_html=True)
 
-# set up the Streamlit app layout
-st.title("🤖 ChatBot 🤖")
+# Get user input and language choice
+user_input, lang_choice = get_text()
+
+# Set up the chatbot model
 MODEL = st.sidebar.selectbox(label='Model', options=['gpt-3.5-turbo', 'text-davinci-003', 'text-davinci-002'])
-
-# Ask the user to enter their OpenAI API key
-API_O = st.text_input(
-    "Enter your OpenAI API-KEY: ",
-    placeholder="Paste your OpenAI API-KEY here:",
-    type="password",
-)
-
-# Session state storage would be ideal
+API_O = "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"
 
 if API_O:
-    # Create an OpenAI instance
-    llm = ChatOpenAI(temperature=0, openai_api_key = API_O, model_name = MODEL, verbose= False)
+    llm = ChatOpenAI(temperature=0, openai_api_key=API_O, model_name=MODEL, verbose=False)
 
-    # Create a ConversationEntityMemory object if not already created
     if "entity_memory" not in st.session_state:
         st.session_state.entity_memory = ConversationEntityMemory(llm=llm)
 
-    #Create the ConversationChain object with the specified configuration
     Conversation = ConversationChain(
-        llm= llm,
-        prompt = ENTITY_MEMORY_CONVERSATION_TEMPLATE,
-        memory = st.session_state.entity_memory,
-    )
-else:
-    st.markdown(
-        """ 
-        ```        
-        - 1. Enter API Key + Hit enter  
-        - 2. Ask anything via the text input widget
-        ```
-        """
-    )
-    st.sidebar.warning(
-        "API key required to try this app. The API key is not stored in any form."
+        llm=llm,
+        prompt=ENTITY_MEMORY_CONVERSATION_TEMPLATE,
+        memory=st.session_state.entity_memory,
     )
 
-#Get user input(text or speech) and language choice
-user_input, lang_choice = get_text()
-
-#Generate the output using the ConversationChain object and user input, and add the input/ouput to sesstion
+# Generate the output using ConversationChain
 if user_input:
-    output = Conversation.run(input=user_input)
+    # Check if the user is asking for the chatbot's name
+    if "tên" in user_input.lower() and "gì" in user_input.lower():
+        if "bạn" in user_input.lower() or "của bạn" in user_input.lower():
+            output = f"Tên của tôi là {CHATBOT_NAME}!"
+        else:
+            output = "Bạn có thể cho tôi biết tên của bạn không?"
+    else:
+        output = Conversation.run(input=user_input)
+
     st.session_state.past.append(user_input)
     st.session_state.generated.append(output)
-
-    # Display the text response
     st.success(f"Chatbot: {output}")
 
-    # choose language for response based on input language
     if lang_choice == "English":
         text_to_speech(output, language="en")
     else:
-        text_to_speech(output, language="vn")
+        text_to_speech(output, language="vi")
 
-# Display the conversation history using an expander
-with st.expander("Conversation History"):
+with st.expander("Lịch sử hội thoại"):
     for i, (query, response) in enumerate(zip(st.session_state.past, st.session_state.generated)):
-        st.info(f"You: {query}")
+        st.info(f"Bạn: {query}")
         st.success(f"Chatbot: {response}")
         if i < len(st.session_state.past) - 1:
             st.write("---")
-
